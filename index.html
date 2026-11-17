@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>Protected page</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#000;color:#fff;font:17px/1.5 system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+  form{width:min(100%,380px);display:grid;gap:14px}
+  svg{width:72px;height:auto;color:#FFB200;margin-bottom:6px}
+  h1{margin:0;font-size:28px;letter-spacing:-.02em;line-height:1.15}
+  p{margin:0;color:#a6a39a}
+  input,button{font:inherit;padding:14px 16px;border-radius:0;border:1px solid #444442;background:#0c0c0b;color:#fff;width:100%}
+  input:focus-visible,button:focus-visible{outline:2px solid #FFB200;outline-offset:2px}
+  button{background:#FFB200;border-color:#FFB200;color:#000;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.6;cursor:progress}
+  #m{min-height:1.5em;font-size:15px}
+  #m.bad{color:#e2553f}
+</style>
+</head>
+<body>
+<form id="f" autocomplete="off">
+  <svg viewBox="0 0 120 48" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M8 4h28a6 6 0 0 1 6 6v8h74a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6v8h-8v-8h-6v6h-8v-6H42v8a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6V10a6 6 0 0 1 6-6Zm6 12v16h16V16H14Z"/></svg>
+  <h1>This page is protected</h1>
+  <p>Enter the password you were given to open it.</p>
+  <input id="p" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Password" required>
+  <button id="b">Open</button>
+  <p id="m" role="status"></p>
+</form>
+<script>
+const SALT = 'EpaL67YXBWQ7mc7+RW+SxQ==', ITER = 600000;
+const bytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const f = document.getElementById('f'), p = document.getElementById('p'), b = document.getElementById('b'), m = document.getElementById('m');
+const sealed = fetch('page.bin').then((r) => { if (!r.ok) throw new Error('page'); return r.arrayBuffer(); });
+// decrypt the page with a raw key; only a right key gets through
+async function unlock(raw) {
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']), buf = new Uint8Array(await sealed);
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, key, buf.slice(12)));
+}
+function show(html, raw64) {                          // the page's films need the key too
+  window.__DS_RAW = raw64;
+  document.open(); document.write(html.replace('<head>', '<head><script>window.__DS_RAW=' + JSON.stringify(raw64) + '<\/script>')); document.close();
+}
+f.addEventListener('submit', async (e) => {
+  e.preventDefault(); b.disabled = true; m.className = ''; m.textContent = 'Opening…';
+  try {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(p.value.trim()), 'PBKDF2', false, ['deriveBits']);
+    const raw = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: bytes(SALT), iterations: ITER, hash: 'SHA-256' }, base, 256));
+    const html = await unlock(raw), raw64 = btoa(String.fromCharCode(...raw));
+    try { sessionStorage.setItem('ds_k', raw64); } catch (_) {}
+    show(html, raw64);
+  } catch (err) { b.disabled = false; m.className = 'bad'; m.textContent = err && err.message === 'page' ? 'The page could not be loaded. Check your connection and try again.' : 'That password did not open the page.'; p.select(); }
+});
+// same tab, already opened once: no need to ask again
+try { const k = sessionStorage.getItem('ds_k'); if (k) unlock(bytes(k)).then((html) => show(html, k)).catch(() => sessionStorage.removeItem('ds_k')); } catch (_) {}
+p.focus();
+</script>
+</body>
+</html>
